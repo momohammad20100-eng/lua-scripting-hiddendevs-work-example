@@ -1,4 +1,4 @@
--- services are declared at the top for easy access and performance optimization
+
 local Players = game:GetService("Players") -- get the Players service for local player
 local TweenService = game:GetService("TweenService") -- tweening service for smooth animations
 local ReplicatedStorage = game:GetService("ReplicatedStorage") -- storage for reusable assets
@@ -537,3 +537,4 @@ end
 
 -- update prompts every frame
 RunService.RenderStepped:Connect(updateEaglePrompts)
+
