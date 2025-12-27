@@ -1,9 +1,3 @@
---[[
-This script demonstrates an interactive obstacle course with moving platforms,
-collectibles, dynamic scoring, camera motion, and power-ups.
-All comments focus on reasoning: explaining why each block exists and how it interacts
-with other components.
-]]
 
 --[[ 
 Services:
@@ -334,4 +328,5 @@ RunService.RenderStepped:Connect(function(dt)
 		h = (h + dt/10) % 1
 		plat.Part.Color = Color3.fromHSV(h,s,v)
 	end
+
 end)
