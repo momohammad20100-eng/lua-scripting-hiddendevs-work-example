@@ -41,10 +41,16 @@ Collectibles: stores all active collectibles for respawn logic.
 PlayerScores: maps players to IntValues for leaderboard updates.
 ActiveMultipliers: tracks temporary scoring multipliers for each player.
 ]]
-local Platforms = {}
-local Collectibles = {}
-local PlayerScores = {}
-local ActiveMultipliers = {}
+
+
+local Platforms = {} -- Each platform will be a PlatformMeta object with movement and touch behavior and to store all Platforms inside the game
+
+local Collectibles = {} -- Used for respawning and tracking existing collectibles and to store all collectible parts.
+
+local PlayerScores = {} -- Key = Player object, Value = IntValue representing the score and to to store each player's score IntValue
+
+local ActiveMultipliers = {} -- Key = Player object, Value = multiplier number (e.g., 1, 2, etc.) And to store each player's active score multiplier
+
 
 --[[ 
 Platform Metatable:
@@ -52,8 +58,11 @@ Encapsulates platform behavior, including creation, movement, touch interaction,
 rotation tweening, and cleanup.
 Using metatables allows multiple independent platforms with unique behaviors.
 ]]
-local PlatformMeta = {}
-PlatformMeta.__index = PlatformMeta
+
+local PlatformMeta = {} -- Table that will act as the class for platforms
+
+PlatformMeta.__index = PlatformMeta -- This allows us to use PlatformMeta:new(), PlatformMeta:Update(), etc, and sets the metatable of the PlatformMeta to itself.
+
 
 --[[ 
 Platform Constructor:
@@ -89,17 +98,34 @@ Attaches a Touched event to the platform.
 When a player touches the platform, they are launched upward with optional horizontal variance.
 Why: Provides immediate feedback, dynamic movement challenge, and integrates with scoring logic.
 ]]
+
 function PlatformMeta:SetupTouch()
-	local conn = self.Part.Touched:Connect(function(hit)
-		local character = hit.Parent
-		local humanoid = character:FindFirstChild("Humanoid")
-		local root = character:FindFirstChild("HumanoidRootPart")
-		if humanoid and root then
-			-- Launch player upward with small X/Z randomness for fun
-			root.Velocity = Vector3.new(math.random(-10,10), Config.LaunchPower, math.random(-10,10))
-		end
-	end)
-	table.insert(self.Connections, conn)
+    -- Connect to the Touched event of the platform part
+    local conn = self.Part.Touched:Connect(function(hit)
+        -- Get the parent of whatever touched the platform (usually the character model)
+        local character = hit.Parent
+
+        -- Check if the character has a Humanoid (to verify it's a player)
+        local humanoid = character:FindFirstChild("Humanoid")
+
+        -- Get the HumanoidRootPart for applying velocity
+        local root = character:FindFirstChild("HumanoidRootPart")
+
+        -- Only proceed if both Humanoid and HumanoidRootPart exist
+        if humanoid and root then
+            -- Launch the player upward
+            -- Y velocity = Config.LaunchPower
+            -- X/Z velocity = small random offset (-10 to 10) for fun effect
+            root.Velocity = Vector3.new(
+                math.random(-10, 10),  -- X-axis random push
+                Config.LaunchPower,     -- Y-axis upward launch
+                math.random(-10, 10)   -- Z-axis random push
+            )
+        end
+    end)
+
+    -- Store this connection in the platform's Connections table for later cleanup
+    table.insert(self.Connections, conn)
 end
 
 --[[ 
@@ -128,25 +154,46 @@ Patterns: linear, oscillate, circular, zigzag.
 Why: Frame-based updates provide smooth motion. Different patterns challenge player timing and positioning.
 ]]
 function PlatformMeta:Update(dt)
-	self.ElapsedTime = self.ElapsedTime + dt
-	local fraction = math.sin(self.ElapsedTime / Config.MoveTime * math.pi)
+    -- Accumulate the elapsed time since the platform started moving.
+    self.ElapsedTime = self.ElapsedTime + dt  
 
-	if self.Pattern == "linear" then
-		local offset = Vector3.new(0, 0, fraction * Config.MoveDistance)
-		self.Part.CFrame = CFrame.new(self.OriginalPosition + offset)
-	elseif self.Pattern == "oscillate" then
-		local offset = Vector3.new(fraction * Config.MoveDistance, 0, 0)
-		self.Part.CFrame = CFrame.new(self.OriginalPosition + offset)
-	elseif self.Pattern == "circular" then
-		local angle = self.ElapsedTime
-		local radius = Config.MoveDistance / 2
-		local offset = Vector3.new(math.cos(angle) * radius, 0, math.sin(angle) * radius)
-		self.Part.CFrame = CFrame.new(self.OriginalPosition + offset)
-	elseif self.Pattern == "zigzag" then
-		local offsetX = math.sin(self.ElapsedTime * 2) * Config.MoveDistance
-		local offsetZ = math.sin(self.ElapsedTime * 3) * Config.MoveDistance / 2
-		self.Part.CFrame = CFrame.new(self.OriginalPosition + Vector3.new(offsetX,0,offsetZ))
-	end
+    -- Calculate a fraction for smooth movement using sine wave.
+    -- This creates smooth in/out transitions as sin goes from 0 -> 1 -> 0.
+    local fraction = math.sin(self.ElapsedTime / Config.MoveTime * math.pi)
+
+    -- Linear movement along the Z-axis
+    if self.Pattern == "linear" then
+        -- Create an offset along the Z-axis based on the fraction
+        local offset = Vector3.new(0, 0, fraction * Config.MoveDistance)
+        -- Set the platform's new position by adding the offset to its original position
+        self.Part.CFrame = CFrame.new(self.OriginalPosition + offset)
+
+    -- Oscillating movement along the X-axis
+    elseif self.Pattern == "oscillate" then
+        -- Offset along X-axis using the same sine fraction
+        local offset = Vector3.new(fraction * Config.MoveDistance, 0, 0)
+        -- Update platform position
+        self.Part.CFrame = CFrame.new(self.OriginalPosition + offset)
+
+    -- Circular movement around the original position
+    elseif self.Pattern == "circular" then
+        -- Use elapsed time as angle to continuously rotate around origin
+        local angle = self.ElapsedTime
+        local radius = Config.MoveDistance / 2  -- Set radius of circular movement
+        -- Calculate circular offset using cosine for X and sine for Z
+        local offset = Vector3.new(math.cos(angle) * radius, 0, math.sin(angle) * radius)
+        -- Update platform's position
+        self.Part.CFrame = CFrame.new(self.OriginalPosition + offset)
+
+    -- Zigzag movement along both X and Z axes
+    elseif self.Pattern == "zigzag" then
+        -- X movement oscillates faster (times 2) 
+        local offsetX = math.sin(self.ElapsedTime * 2) * Config.MoveDistance
+        -- Z movement oscillates differently (times 3) at half distance
+        local offsetZ = math.sin(self.ElapsedTime * 3) * Config.MoveDistance / 2
+        -- Update platform's position with combined X and Z offsets
+        self.Part.CFrame = CFrame.new(self.OriginalPosition + Vector3.new(offsetX, 0, offsetZ))
+    end
 end
 
 --[[ 
@@ -154,12 +201,13 @@ Destroy Function:
 Disconnects all events and destroys the platform part.
 Why: Proper cleanup prevents memory leaks and unintended behavior in live games.
 ]]
+
 function PlatformMeta:Destroy()
-	for _, conn in pairs(self.Connections) do
+	for _, conn in (self.Connections) do
 		conn:Disconnect()
 	end
-	self.RotationTween:Cancel()
-	self.Part:Destroy()
+	self.RotationTween:Cancel() -- Cancels the tween rotation.
+	self.Part:Destroy() -- Destroys the part.
 end
 
 --[[ 
@@ -167,20 +215,36 @@ Platform Generation Loop:
 Creates multiple platforms with varied patterns and positions.
 Why: Variety in platform behavior increases course complexity and engages players.
 ]]
+
 for i = 1, Config.PlatformCount do
-	local position = Vector3.new(i*(Config.PlatformSize.X+5),5,math.random(-5,5))
-	local pattern
-	if i % 4 == 1 then
-		pattern = "linear"
-	elseif i % 4 == 2 then
-		pattern = "oscillate"
-	elseif i % 4 == 3 then
-		pattern = "circular"
-	else
-		pattern = "zigzag"
-	end
-	local platform = PlatformMeta.new(position, pattern, i)
-	table.insert(Platforms, platform)
+    -- Calculate a position for this platform
+    -- X is spaced out by platform width + 5 units
+    -- Y is fixed at 5 units above the ground
+    -- Z is randomized slightly between -5 and 5 to create variation
+    local position = Vector3.new(
+        i * (Config.PlatformSize.X + 5),  -- X position: spread platforms horizontally
+        5,                                -- Y position: height of platform
+        math.random(-5, 5)                -- Z position: small random offset for variation
+    )
+
+    -- Determine the movement pattern of the platform based on its index
+    local pattern
+    if i % 4 == 1 then
+        pattern = "linear"     -- Every 1st platform in a group of 4 is linear
+    elseif i % 4 == 2 then
+        pattern = "oscillate"  -- 2nd is oscillate
+    elseif i % 4 == 3 then
+        pattern = "circular"   -- 3rd is circular
+    else
+        pattern = "zigzag"     -- 4th is zigzag
+    end
+
+    -- Create a new platform using the PlatformMeta class
+    -- Pass in the calculated position, chosen pattern, and its index i
+    local platform = PlatformMeta.new(position, pattern, i)
+
+    -- Add this platform to the Platforms table for later updating/moving
+    table.insert(Platforms, platform)
 end
 
 --[[ 
@@ -189,20 +253,29 @@ Tracks player scores and initializes score multipliers.
 Why: Integrates with the scoring system and allows leaderboard display in-game.
 ]]
 Players.PlayerAdded:Connect(function(player)
-	local leaderstats = Instance.new("Folder")
-	leaderstats.Name = "leaderstats"
-	leaderstats.Parent = player
-	local score = Instance.new("IntValue")
-	score.Name = Config.LeaderboardName
-	score.Value = 0
-	score.Parent = leaderstats
-	PlayerScores[player] = score
-	ActiveMultipliers[player] = 1
+    -- Create a folder to hold leaderboard stats for this player
+    local leaderstats = Instance.new("Folder")
+    leaderstats.Name = "leaderstats"      -- Roblox automatically recognizes "leaderstats" for the leaderboard GUI
+    leaderstats.Parent = player           -- Parent it to the player so it's visible in the leaderboard
+
+    -- Create an IntValue to track this player's score
+    local score = Instance.new("IntValue")
+    score.Name = Config.LeaderboardName  -- Name it according to your config (e.g., "Score")
+    score.Value = 0                       -- Initial score is 0
+    score.Parent = leaderstats            -- Put it inside the leaderstats folder
+
+    -- Store a reference to this player's score in a table for easy access in scripts
+    PlayerScores[player] = score
+
+    -- Initialize a multiplier for this player (used for score bonuses, etc.)
+    ActiveMultipliers[player] = 1
 end)
 
+-- When a player leaves the game
 Players.PlayerRemoving:Connect(function(player)
-	PlayerScores[player] = nil
-	ActiveMultipliers[player] = nil
+    -- Clean up references to this player's data to prevent memory leaks
+    PlayerScores[player] = nil
+    ActiveMultipliers[player] = nil
 end)
 
 --[[ 
@@ -210,25 +283,35 @@ SpawnCollectible Function:
 Creates a collectible above a platform and manages touch interaction.
 Why: Encourages exploration, scores points, and integrates with multipliers.
 ]]
-local function SpawnCollectible(position,index)
-	local part = Instance.new("Part")
-	part.Size = Config.CollectibleSize
-	part.Position = position
-	part.Anchored = true
-	part.BrickColor = BrickColor.Random()
-	part.Name = "Collectible_"..index
-	part.Parent = Workspace
-	table.insert(Collectibles, part)
+local function SpawnCollectible(position, index)
+    -- Create a new Part to act as the collectible
+    local part = Instance.new("Part")
+    part.Size = Config.CollectibleSize     -- Set size from configuration
+    part.Position = position               -- Set position in the world
+    part.Anchored = true                   -- Keep it in place; it won't fall due to gravity
+    part.BrickColor = BrickColor.Random()  -- Give it a random color for variety
+    part.Name = "Collectible_"..index      -- Name it uniquely
+    part.Parent = Workspace                -- Add it to the Workspace so it appears in-game
 
-	local conn
-	conn = part.Touched:Connect(function(hit)
-		local player = Players:GetPlayerFromCharacter(hit.Parent)
-		if player and PlayerScores[player] then
-			PlayerScores[player].Value = PlayerScores[player].Value + ActiveMultipliers[player]
-			conn:Disconnect()
-			part:Destroy()
-		end
-	end)
+    -- Keep track of this collectible in a table for future reference if needed
+    table.insert(Collectibles, part)
+
+    -- Connect a Touched event to detect when a player touches the collectible
+    local conn
+    conn = part.Touched:Connect(function(hit)
+        -- Get the player who touched the part (if it’s a character)
+        local player = Players:GetPlayerFromCharacter(hit.Parent)
+        if player and PlayerScores[player] then
+            -- Add score for this player, multiplied by their active multiplier
+            PlayerScores[player].Value = PlayerScores[player].Value + ActiveMultipliers[player]
+
+            -- Disconnect the Touched event so it doesn’t trigger again
+            conn:Disconnect()
+
+            -- Remove the collectible from the game
+            part:Destroy()
+        end
+    end)
 end
 
 --[[ 
@@ -236,10 +319,19 @@ Initial Collectible Spawn:
 Spawns collectibles on each platform at different positions.
 Why: Ensures players have multiple scoring opportunities from the start.
 ]]
+
 for i = 1, Config.CollectibleCount do
-	local plat = Platforms[(i-1) % #Platforms + 1]
-	local pos = plat.Part.Position + Vector3.new(0,5,math.random(-3,3))
-	SpawnCollectible(pos,i)
+    -- Choose a platform for this collectible
+    -- Uses modulo to cycle through all platforms if there are more collectibles than platforms
+    local plat = Platforms[(i - 1) % #Platforms + 1]
+
+    -- Calculate the position for the collectible
+    -- X and Z come from the platform, Y is raised by 5 units so the collectible floats above the platform
+    -- Slight random offset in Z (-3 to 3) to avoid stacking collectibles exactly in the same spot
+    local pos = plat.Part.Position + Vector3.new(0, 5, math.random(-3, 3))
+
+    -- Spawn the collectible at the calculated position with a unique index
+    SpawnCollectible(pos, i)
 end
 
 
@@ -248,28 +340,62 @@ Camera Tween Setup:
 Creates a continuous camera rotation for demo purposes.
 Why: Highlights platforms dynamically and demonstrates TweenService usage.
 ]]
+
+-- Get the current camera in the Workspace
 local camera = Workspace.CurrentCamera
-local camTweenInfo = TweenInfo.new(20,Enum.EasingStyle.Linear,Enum.EasingDirection.InOut,-1,true)
-local camGoal = {CFrame = CFrame.new(0,Config.CameraHeight,-50) * CFrame.Angles(0,Config.MaxCameraAngle,0)}
-local camTween = TweenService:Create(camera,camTweenInfo,camGoal)
+
+-- Create TweenInfo for the camera movement
+-- 20 seconds duration, linear easing style, in/out easing direction
+-- -1 repeats means infinite looping, true = reverses tween each time (back-and-forth)
+local camTweenInfo = TweenInfo.new(
+    20,                          -- Duration of 20 seconds
+    Enum.EasingStyle.Linear,     -- Linear easing (constant speed)
+    Enum.EasingDirection.InOut,  -- Smooth in/out transition
+    -1,                          -- Repeat infinitely
+    true                         -- Reverse tween after each cycle (ping-pong)
+)
+
+-- Define the goal CFrame for the camera
+-- Moves camera to (0, CameraHeight, -50) and rotates by MaxCameraAngle radians on Y-axis
+local camGoal = {
+    CFrame = CFrame.new(0, Config.CameraHeight, -50) * 
+            CFrame.Angles(0, Config.MaxCameraAngle, 0)
+}
+
+-- Create the tween for the camera using TweenService
+local camTween = TweenService:Create(camera, camTweenInfo, camGoal)
+
+-- Play the tween (starts moving the camera)
 camTween:Play()
+
 
 --[[ 
 Collectible Respawn Loop:
 Periodically checks and respawns missing collectibles.
 Why: Maintains gameplay continuity and ensures persistent challenge.
 ]]
+
+-- Start a new thread to handle periodic collectible respawning
 task.spawn(function()
-	while true do
-		task.wait(20)
-		for i = 1, Config.CollectibleCount do
-			if not Collectibles[i] or not Collectibles[i].Parent then
-				local plat = Platforms[(i-1) % #Platforms + 1]
-				local pos = plat.Part.Position + Vector3.new(0,5,math.random(-3,3))
-				SpawnCollectible(pos,i)
-			end
-		end
-	end
+    while true do
+        -- Wait 20 seconds before checking/respawning collectibles
+        task.wait(20)
+
+        -- Loop through all collectible slots
+        for i = 1, Config.CollectibleCount do
+            -- Check if the collectible is missing or has been destroyed
+            if not Collectibles[i] or not Collectibles[i].Parent then
+                -- Choose a platform to spawn the collectible on
+                local plat = Platforms[(i - 1) % #Platforms + 1]
+
+                -- Calculate a new position slightly above the platform with random Z offset
+                local pos = plat.Part.Position + Vector3.new(0, 5, math.random(-3, 3))
+
+                -- Spawn the collectible at the new position with the same index
+                SpawnCollectible(pos, i)
+            end
+        end
+    end
 end)
 
 --[[ 
@@ -277,29 +403,38 @@ Score Multiplier Power-Up:
 Spawns temporary multipliers at random positions to incentivize risk-taking.
 Why: Encourages players to move strategically, increases dynamic scoring, and demonstrates timed effects.
 ]]
-local function SpawnMultiplier(position, multiplierValue, duration)
-	local part = Instance.new("Part")
-	part.Size = Vector3.new(3,3,3)
-	part.Position = position
-	part.Anchored = true
-	part.BrickColor = BrickColor.new("Bright yellow")
-	part.Name = "Multiplier"
-	part.Parent = Workspace
 
-	local conn
-	conn = part.Touched:Connect(function(hit)
-		local player = Players:GetPlayerFromCharacter(hit.Parent)
-		if player and PlayerScores[player] then
-			ActiveMultipliers[player] = multiplierValue
-			task.delay(duration, function()
-				if ActiveMultipliers[player] then
-					ActiveMultipliers[player] = 1
-				end
-			end)
-			conn:Disconnect()
-			part:Destroy()
-		end
-	end)
+local function SpawnMultiplier(position, multiplierValue, duration)
+    -- Create a new Part to represent the multiplier
+    local part = Instance.new("Part")
+    part.Size = Vector3.new(3, 3, 3)              -- Fixed size
+    part.Position = position                       -- Position in the world
+    part.Anchored = true                           -- Stay in place
+    part.BrickColor = BrickColor.new("Bright yellow") -- Bright color for visibility
+    part.Name = "Multiplier"                       -- Name for organization
+    part.Parent = Workspace                         -- Add to Workspace so it appears in-game
+
+    -- Connect a Touched event to detect when a player touches the multiplier
+    local conn
+    conn = part.Touched:Connect(function(hit)
+        -- Get the player who touched it
+        local player = Players:GetPlayerFromCharacter(hit.Parent)
+        if player and PlayerScores[player] then
+            -- Apply the multiplier to this player's active multiplier
+            ActiveMultipliers[player] = multiplierValue
+
+            -- After `duration` seconds, reset the multiplier back to 1
+            task.delay(duration, function()
+                if ActiveMultipliers[player] then
+                    ActiveMultipliers[player] = 1
+                end
+            end)
+
+            -- Disconnect the Touched event and remove the part
+            conn:Disconnect()
+            part:Destroy()
+        end
+    end)
 end
 
 --[[ 
@@ -307,26 +442,20 @@ Periodic Multiplier Spawn:
 Spawns a multiplier on a random platform every 30 seconds.
 Why: Keeps gameplay engaging and rewards attentive players dynamically.
 ]]
+
 task.spawn(function()
-	while true do
-		task.wait(30)
-		local plat = Platforms[math.random(1,#Platforms)]
-		local pos = plat.Part.Position + Vector3.new(0,5,0)
-		SpawnMultiplier(pos, 2, Config.ScoreMultiplierTime)
-	end
-end)
+    while true do
+        -- Wait 30 seconds between each multiplier spawn
+        task.wait(30)
 
---[[ 
-Platform Color Shift:
-Changes platform colors gradually over time for visual feedback and variation.
-Why: Enhances visual dynamics and provides subtle cues to players about platform activity.
-]]
-RunService.RenderStepped:Connect(function(dt)
-	for _, plat in pairs(Platforms) do
-		local color = plat.Part.Color
-		local h,s,v = Color3.toHSV(color)
-		h = (h + dt/10) % 1
-		plat.Part.Color = Color3.fromHSV(h,s,v)
-	end
+        -- Choose a random platform from the Platforms table
+        local plat = Platforms[math.random(1, #Platforms)]
 
+        -- Position the multiplier slightly above the platform
+        local pos = plat.Part.Position + Vector3.new(0, 5, 0)
+
+        -- Spawn a multiplier at the calculated position
+        -- This multiplier gives a 2x score boost and lasts Config.ScoreMultiplierTime seconds
+        SpawnMultiplier(pos, 2, Config.ScoreMultiplierTime)
+    end
 end)
