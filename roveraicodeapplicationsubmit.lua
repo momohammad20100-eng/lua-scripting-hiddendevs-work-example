@@ -1,7 +1,3 @@
--- this application is rewritten to meet the requirements
--- script exceeds two hundred lines and includes clear explanation comments
--- this is a rover control system featuring gui tweening movement logic physics checks
--- this version is optimized modular readable advanced and includes death fade and auto exit
 
 local uis = game:GetService("UserInputService")
 local rs = game:GetService("RunService")
@@ -197,3 +193,4 @@ end)
 plr.Character:WaitForChild("Humanoid").Died:Connect(function()
 	handleDeath()
 end)
+
